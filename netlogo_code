@@ -1,0 +1,696 @@
+extensions [gis palette vid]
+breed [fires fire] ;fire front
+breed [embers ember] 
+breed [ashes ash] ;burnt land
+breed [smoke smok] smoke-own [smoke-life]
+breed [spinners spinner ] ;clock
+breed [dots dot]
+globals [view autoburn burnday today tslb-dataset  dem-dataset
+    veg-dataset wetness-dataset burnt2017-dataset burnt2018-dataset  cliff-dataset
+    DOY-dataset dayofmonth dayofyear date
+    burnt-area border land randburn
+    night timeofday tod iteration timeod int-fire-danger exploded int-ws
+    tempcolor
+    wsv cws windran wd wd-1 wd-2 wd-3 wd-4 wd-5 wd-6 wd-7 direction
+    ember-fly-dist ember-rand hotspots monthname]
+patches-own [ab burntab
+  Wetness
+  elevation
+  burnt
+  veg
+  tslb
+  slope
+  wind
+  burnablity
+  burnprob
+  burnttime
+  fuelload
+  topowet
+  HotSpot_Burn
+  SAVED-IGNITION out1 totalout]
+
+to setup
+  __clear-all-and-reset-ticks
+  set-default-shape turtles "circle"
+  set view "Hill Shade"
+  set night night = 0
+  set ember-fly-dist 0
+  set-time-of-day
+  ask patches [set wind 1]
+  ask patches [set burnttime 1]
+  set border patches with [ count neighbors != 8 ]
+  setup-patches
+  set land patches with [ elevation > 1 ]
+  ask patches [set-fuelload]
+  clear
+end
+
+to clear
+  clear-turtles
+  reset-ticks
+;  set-time-of-day
+  ask patches [set burnt 100]
+  ask patches [set burnttime 1]
+  view-new
+end
+
+to go
+    set night (ticks / 300) ;; Need To Change With Difference Spatial Resolution
+    if  time-of-day [changeFire_Danger]
+    if Stop-if-no-fire and not any? embers and not any? fires [stop]
+    ask border   [  ask turtles-here [ die ]  ]
+    ask turtles  [calc-slope]
+    ask turtles [calc-windinfluence]
+    if ticks = 0 [set-windspeed ask patches [set-topowet] ]
+    check-spread
+    set burnt-area ((count patches with [burnt = 0]) * 0.0064) ;; Need To Change With Difference Spatial Resolution
+    fade-embers
+    set tod tod + 1
+    ;;if not any? turtles [save-iter]
+    change-wind-speed
+    tick
+    if vid:recorder-status = "recording" [ vid:record-view ]
+     ask spinners with [size > 59] [ set heading  (tod * 2.4 + 150)]
+  if exploded = 1 [ ask patches with [SAVED-IGNITION = 50] [explode] ]
+    update-labels
+    move-smoke
+end
+
+;***********************************SET FIRE WEATHER***********************************
+to set-fire-weather
+set int-fire-danger fire_danger
+set int-ws wsv
+show-labels
+set-windspeed
+set-time-of-day
+ask patches [if TSLB = 0 [set fuelload (-0.15 * Fire_Danger + 1.75)]]
+
+end
+
+;***************************************************************************************
+;***********************************CHECK FIRE SPREAD***********************************
+;***************************************************************************************
+
+to check-spread
+    ask fires  ;;determines intial spread make probability lower to simultate rapid fire spred only under high burn conditions.
+     [ set randburn (random-float 60) ;22
+          ask neighbors [ set burnablity  (fuelload * (((-0.039 * (Fire_Danger ^ 2)) + (Fire_Danger * 0.8) - 0.7)  * (topowet)))]
+          ask neighbors [ set burnprob ((burnablity * (wind * slope)))]
+          ask neighbors with [randburn < burnprob and burnt = 100 ][ignite]
+        let emberfly patch-at-heading-and-distance direction ember-fly-dist
+        if emberfly != nobody  [ask emberfly [if burnt = 100 [ignite]]]
+        set breed embers
+        make-smoke ]
+ask embers
+        [ set randburn (random-float 50) ;23
+          ask neighbors with [ ((randburn + (burnttime * 2)) < (burnprob)) and burnt = 100 ][let ransnd random 20 ignite]] ;2.5
+end
+
+;***************************************************************************************
+;*************************************    IGNITION   ***********************************
+;***************************************************************************************
+to make-smoke
+  if (cws = 1)
+      [ask patch-here [sprout-smoke 1 [set smoke-life random 400 set size 4 set color [200 200 200 20]]] ]
+  if (cws = 2)
+     [ let smoke-appear patch-at-heading-and-distance direction  random 3
+        if smoke-appear != nobody [ask smoke-appear [sprout-smoke 1 [set smoke-life random 200 set size 3 set heading direction set color [200 200 200 40]]] ]]
+  if (cws = 3)
+     [ let smoke-appear patch-at-heading-and-distance direction  random 3
+        if smoke-appear != nobody [ask smoke-appear [sprout-smoke 1 [set smoke-life random 200 set size 3 set heading direction set color [200 200 200 40]]] ]]
+  if (cws = 4)
+     [ let smoke-appear patch-at-heading-and-distance direction  random 5
+        if smoke-appear != nobody [ask smoke-appear [sprout-smoke 1 [set smoke-life random 200 set size 3 set heading direction set color [200 200 200 40]]] ]]
+end
+
+to move-smoke
+  if (cws = 2)  [ask smoke [fd .5]]
+  if (cws = 3)  [ask smoke [fd 1]]
+  if (cws = 4)  [ask smoke [fd 2]]
+  ask smoke  [set smoke-life smoke-life + 1 ]
+  ask smoke [if smoke-life > 180 [die]]
+end
+
+to ignite
+  sprout-fires 1
+    [ set color 45     set burnt burnt - 100
+      ]
+  if Protected-areas [ask self [if SAVED-IGNITION = 100 [explode set exploded 1] ]]
+;  set pcolor black
+
+end
+
+;drop incendaries
+to ignite-forest
+;; light a fire where the user says to
+  if (mouse-down?)
+    [  ask patch mouse-xcor mouse-ycor
+      [  sprout-fires 1
+        [  set color 45
+          ask patches in-cone 1 360
+          [ sprout-fires 1
+            [  set color 45
+            ;;  set burnt burnt - 100   ]
+                ]  ]]
+        display      ]    ]
+end
+
+;re-ignite saved patches
+to set-ignition
+  ask patches with [SAVED-IGNITION = 1]
+  [ sprout-fires 1 [set color 45 ]]
+end
+
+;Draw fire-break
+to fire-break
+  ;; create burnt cells where the user says to
+  if (mouse-down?)
+    [  ask patch mouse-xcor mouse-ycor
+      [  sprout-ashes 1
+        [  set color black
+          ask patches in-cone 3 360
+          [ sprout-ashes 1
+            [  set color black
+              set burnt burnt - 100   ]    ]  ]
+        display      ]    ]
+end
+
+to fade-embers
+    ask embers
+    [ set  burnttime burnttime + 1
+    if burnttime = 1 [set color [255 255 0 150]]
+      if burnttime = 2 [set color  [255 255 0 150]]
+      if burnttime = 3 [set color  [255 255 0 150]]
+      if burnttime = 4 [set  color [255 255 0 150]]
+      if burnttime = 5 [set color  25]
+      if burnttime = 6 [set color  15]
+      if burnttime = 7 [set color  27]
+      if burnttime = 8 [set color  42]
+      if burnttime = 9 [set  color 23]
+      if burnttime = 10 [set color  26]
+      if burnttime = 11 [set color  15]
+      if burnttime = 12 [set color  24]
+      if burnttime = 13 [set color  15]
+      if burnttime > 60 / 3 and burnttime < 60 [set color  11]
+      if burnttime > 60 [set pcolor 1 die]]
+end
+
+
+;***************************************************************************************
+;******************************BURNABILITY LAYER ADJUSTMENTS****************************
+;***************************************************************************************
+
+to set-topowet
+  set topowet wetness
+  if ( wetness  > .7 and wetness < .8 and Fire_Danger = 10) [set topowet (1.4)]
+  if ( wetness  > .8 and wetness < .9 and Fire_Danger = 7) [set topowet (1)]
+  if ( wetness  > .8 and wetness < .9 and Fire_Danger > 7) [set topowet (1.2)]
+  if ( wetness  > .9 and wetness < 1 and Fire_Danger = 7) [set topowet (1)]
+  if ( wetness  > .9 and wetness < 1 and Fire_Danger > 7) [set topowet (1.1)]
+  if ( wetness  > 1.05 and wetness < 1.1 and Fire_Danger > 8) [set topowet (1)]
+  if ( wetness  > 1.1 and wetness < 1.15 and Fire_Danger > 7) [set topowet (1)]
+  if ( wetness  > 1.15 and wetness < 1.2 and Fire_Danger > 8) [set topowet (.8)]
+  if ( wetness  > 1.2 and wetness < 1.3 and Fire_Danger = 7) [set topowet (1.1)]
+  if ( wetness  > 1.2 and wetness < 1.3 and Fire_Danger = 8) [set topowet (.8)]
+  if ( wetness  > 1.2 and wetness < 1.3 and Fire_Danger > 8) [set topowet (.7)]
+  if ( wetness  > 1.3 and Fire_Danger = 7) [set topowet (.8)]
+  if ( wetness  > 1.3 and Fire_Danger = 8) [set topowet (.7)]
+  if ( wetness  > 1.3 and Fire_Danger > 8) [set topowet (.6)]
+end
+
+to set-fuelload
+;based on: C. P. Yates et al., “Fuel accumulation, consumption and fire patchiness in the lower rainfall savanna region,” Carbon Account. Savanna Fire Manag., pp. 115–132, 2015, 
+
+   if veg = 1  [set fuelload (( -0.0054 * (tslb ^ 2)) + (0.0966 * tslb) + 0.87) ] ; tussock
+   if veg = 2 [set fuelload ( (0.0014 * (tslb ^ 3)) + ( -0.0421 * (tslb ^ 2)) + ( 0.4243 * tslb) + 0.115) ] ;Hummock
+   if veg = 3 [set fuelload ( (0.001115 * (tslb ^ 3)) + ( -0.03 * (tslb ^ 2)) + ( 0.28 * tslb) + 0.5) ] ; mixed
+   if veg = 4  [set fuelload 0.1 ] ;main road
+   if veg = 5  [set fuelload 0.4 ] ; 2nd road
+   if veg = 6  [set fuelload 0.6 ] ; track
+   if veg = 7  [set fuelload 0.1 ] ; fence - fire break
+   if veg = 8  [set fuelload 0.3 ] ; fence
+   if veg = 9  [set fuelload 0.7 ] ; riparian
+   if veg = 10  [set fuelload 0.1 ] ; river
+   if TSLB = 0 [set fuelload (.5)]
+end
+
+
+
+;***************************************************************************************
+;***********************************SLOPE***********************************************
+;***************************************************************************************
+;based on: Sullivan AL, etal. A downslope fire spread correction factor based on landscape-scale fire behaviour. Environmental modelling & software. 2014
+; Need To Change With Difference Spatial Resolution
+
+to calc-slope ;;NTC - with differeing cell size
+  ;; calulate slope from a burning pixel to surrounding pixeles using elevation data
+   let e1  [elevation]  of patch-at 0 1
+   let s1 (e1 - [elevation]  of patch-here) / .8
+   ask patch-at 0 1 [
+    if s1 > 0 [let slopedeg atan 1 (100 / s1) set slope  (2 ^ (slopedeg / 10)) ^ .6]
+    if s1 < 0  [let slopedeg atan 1 (100 / abs(s1)) set slope ((2 ^ (slopedeg / 10)) / (2 * (2 ^ (slopedeg / 10)) - 1) ^ .6)]]
+
+
+   let e2  [elevation]  of patch-at 1 0
+   let s2 (e2 - [elevation]  of patch-here ) / 80
+   ask patch-at 1 0 [
+    if s2 > 0 [let slopedeg atan 1 (100 / s2) set slope  (2 ^ (slopedeg / 10)) ^ .6]
+    if s2 < 0  [let slopedeg atan 1 (100 / abs(s2)) set slope ((2 ^ (slopedeg / 10)) / (2 * (2 ^ (slopedeg / 10)) - 1) ^ .6)]]
+
+   let e3  [elevation]  of patch-at 0 -1
+   let s3 (e3 - [elevation]  of patch-here ) / 80
+   ask patch-at 0 -1 [
+    if s3 > 0 [let slopedeg atan 1 (100 / s3) set slope  (2 ^ (slopedeg / 10)) ^ .6]
+    if s3 < 0  [let slopedeg atan 1 (100 / abs(s3)) set slope ((2 ^ (slopedeg / 10)) / (2 * (2 ^ (slopedeg / 10)) - 1) ^ .6)]]
+
+   let e4  [elevation]  of patch-at -1 0
+   let s4 (e4 - [elevation]  of patch-here ) / 80
+   ask patch-at -1 0 [
+    if s4 > 0 [let slopedeg atan 1 (100 / s4) set slope  (2 ^ (slopedeg / 10)) ^ .6]
+    if s4 < 0  [let slopedeg atan 1 (100 / abs(s4)) set slope ((2 ^ (slopedeg / 10)) / (2 * (2 ^ (slopedeg / 10)) - 1) ^ .6)]]
+
+   let e5  [elevation]  of patch-at 1 -1
+   let s5 (e5 - [elevation]  of patch-here ) / 80
+   ask patch-at 1 -1 [
+    if s5 > 0 [let slopedeg atan 1 (100 / s5) set slope  (2 ^ (slopedeg / 10)) ^ .6]
+    if s5 < 0  [let slopedeg atan 1 (100 / abs(s5)) set slope ((2 ^ (slopedeg / 10)) / (2 * (2 ^ (slopedeg / 10)) - 1) ^ .6)]]
+
+   let e6  [elevation]  of patch-at -1 -1
+   let s6 (e6 - [elevation]  of patch-here ) / 80
+   ask patch-at -1 -1  [
+    if s6 > 0 [let slopedeg atan 1 (100 / s6) set slope  (2 ^ (slopedeg / 10)) ^ .6]
+    if s6 < 0  [let slopedeg atan 1 (100 / abs(s6)) set slope ((2 ^ (slopedeg / 10)) / (2 * (2 ^ (slopedeg / 10)) - 1) ^ .6)]]
+
+   let e7  [elevation]  of patch-at 1 1
+   let s7 (e7 - [elevation]  of patch-here ) / 80
+   ask patch-at 1 1 [
+    if s7 > 0 [let slopedeg atan 1 (100 / s7) set slope  (2 ^ (slopedeg / 10)) ^ .6]
+    if s7 < 0  [let slopedeg atan 1 (100 / abs(s7)) set slope ((2 ^ (slopedeg / 10)) / (2 * (2 ^ (slopedeg / 10)) - 1) ^ .6)]]
+
+   let e8  [elevation]  of patch-at -1 1
+   let s8 (e8 - [elevation]  of patch-here ) / 80
+  ask patch-at -1 1 [
+    if s8 > 0 [let slopedeg atan 1 (100 / s8) set slope  (2 ^ (slopedeg / 10)) ^ .6]
+    if s8 < 0  [let slopedeg atan 1 (100 / abs(s8)) set slope ((2 ^ (slopedeg / 10)) / (2 * (2 ^ (slopedeg / 10)) - 1) ^ .6)]]
+
+
+
+end
+
+;***************************************************************************************
+;***********************************Time of Day***********************************************
+;***************************************************************************************
+;; Need To Change With Difference Spatial Resolution
+
+to changeFire_Danger ;;NTC - with differeing cell size
+
+if tod > 300 [set tod 0 set night night + 1]
+if tod = 180 [set timeofday "night"
+  ask patch 100 100 [ sprout-dots 1 [ set size 5000 set color [1 1 1 15]]]]
+  if tod = 184 [ask dots [ set color [1 1 1 25]]]
+  if tod = 186 [ask dots [ set color [1 1 1 30]]]
+  if tod = 187 [ask dots [ set color [1 1 1 37]]]
+  if tod = 188 [ask dots [ set color [1 1 1 42]]]
+  if tod = 189 [ask dots [ set color [1 1 1 50]]]
+  if tod = 191 [ask dots [ set color [1 1 1 65]]]
+  if tod = 193 [ask dots [ set color [1 1 1 75]]]
+
+if tod = 135 and wsv > 1 [set wsv int-ws - 1]
+if tod = 14 and wsv < 4 and int-ws != 1 [set wsv int-ws]
+  if tod = 1 [set timeofday "day" ask dots [ set color [1 1 1 55]]]
+  if tod = 2 [ask dots [ set color [1 1 1 47]]]
+  if tod = 4 [ask dots [ set color [1 1 1 40]]]
+  if tod = 6 [ask dots [ set color [1 1 1 35]]]
+  if tod = 8 [ask dots [ set color [1 1 1 25]]]
+  if tod = 10 [ask dots [ set color [1 1 1 10]]]
+  if tod = 12 [ask dots [ die]];
+
+      if tod = 13 [set Fire_Danger Fire_Danger + 1 set timeod "Morning" ]
+       if tod = 62 [set Fire_Danger Fire_Danger + 1 set timeod "Noon"]
+        if tod = 112 [set Fire_Danger Fire_Danger + 1 set timeod "Afternoon"]
+         if tod = 162  [set Fire_Danger Fire_Danger - 1 set timeod "Evening"]
+          if tod = 212 [set Fire_Danger Fire_Danger - 1 set timeod "Evening"]
+           if tod = 262 [set Fire_Danger Fire_Danger - 1 set timeod "early morning"]
+            if tod = 287 [set Fire_Danger Fire_Danger - 1 set timeod "early morning"]
+              if tod = 300 [set Fire_Danger Fire_Danger + 1 set timeod "Dawn"]
+
+end
+
+To set-time-of-day
+  if set-time = "morning" [set tod 14 set timeod "morning" set Fire_Danger Fire_Danger - 1]
+    if set-time = "noon" [set tod 63 set timeod "noon"]
+      if set-time = "afternoon" [set tod 113 set timeod "afternoon" set Fire_Danger Fire_Danger + 1]
+        if set-time = "evening" [set tod 163  set timeod "evening"]
+end
+
+
+
+
+
+;***************************************************************************************
+;***********************************WIND INFLUENCE**************************************
+;***************************************************************************************
+
+to set-windspeed
+  ;; setting wind speed influence on burn probability relative to wind direction
+  if wind-speed = "none" [set int-ws 1 set wsv 1 set cws 1]
+  if wind-speed = "light" [set int-ws 2 set wsv 2 set cws 2]
+  if wind-speed = "medium" [set int-ws 3 set wsv 3 set cws 3]
+  if wind-speed = "strong" [set int-ws 4 set wsv 4 set cws 4]
+   if (wsv = 1)
+      [set wd .5 set wd-1 .5 set wd-2 .5 set wd-3 .5 set wd-4 .5 set wd-5 .5 set wd-6 .5 set wd-7 .5 ]
+   if (wsv = 2)
+      [set wd .9 set wd-1 .9 set wd-2 .8 set wd-3 .7 set wd-4 .6 set wd-5 .7 set wd-6 .8 set wd-7 .9 ]
+   if (wsv = 3 )
+      [set wd 1.2 set wd-1 1 set wd-2 .8 set wd-3 .6 set wd-4 .5 set wd-5 .6 set wd-6 .8 set wd-7 1 ]
+   if (wsv = 4)
+      [set wd 1.5 set wd-1 .9 set wd-2 .4 set wd-3 .2 set wd-4 .1 set wd-5 .2 set wd-6 .4 set wd-7 .9 ]
+end
+
+to change-wind-speed
+set windran random-float 1
+let windchange  0
+if (wsv = 1 and windchange = 0 and  cws = 1 and windran  < .05) [set windchange  1 set cws 2]
+If (wsv = 1 and windchange = 0 and  cws = 2 and windran < .9) [set windchange  1 set cws 1]
+if (wsv = 1 and windchange = 0 and  cws = 3 and windran  < .99) [set windchange  1 set cws 2]
+If (wsv = 1 and windchange = 0 and  cws = 4 and windran < .99) [set windchange  1 set cws 2]
+
+
+if (wsv = 2 and windchange = 0 and  cws = 1 and windran  < .6) [set windchange  1 set cws  2]
+If (wsv = 2 and windchange = 0 and  cws = 2 and windran < .2) [set windchange  1 set cws  1]
+If (wsv = 2 and windchange = 0 and  cws = 2 and windran >  .9) [set windchange  1 set cws  3]
+If (wsv = 2 and windchange = 0 and  cws = 3 and windran < .8) [set windchange  1 set cws  2]
+If (wsv = 2 and windchange = 0 and  cws = 3 and windran >  .995) [set windchange  1 set cws  4]
+If (wsv = 2 and windchange = 0 and  cws = 4 and windran < .995) [set windchange  1 set cws  3]
+
+if (wsv = 3 and windchange = 0 and  cws = 1 and windran  < .9) [set windchange  1 set cws  2]
+If (wsv = 3 and windchange = 0 and  cws = 2 and windran < .1) [set windchange  1 set cws  1]
+If (wsv = 3 and windchange = 0 and  cws = 2 and windran >  .6)  [set windchange  1 set cws  3]
+If (wsv = 3 and windchange = 0 and  cws = 3 and windran < .2)   [set windchange  1 set cws  2]
+If (wsv = 3 and windchange = 0 and  cws = 3 and windran > .96 ) [set windchange  1 set cws  4]
+If (wsv = 3 and windchange = 0 and  cws = 4 and windran < .99 ) [set windchange  1 set cws  3]
+
+if (wsv = 4 and windchange = 0 and  cws = 1 and windran  < .9) [set windchange  1 set cws  2]
+If (wsv = 4 and windchange = 0 and  cws = 2 and windran < .1 ) [set windchange  1 set cws  1]
+If (wsv = 4 and windchange = 0 and  cws = 2 and windran >  .4) [set windchange  1 set cws  3]
+If (wsv = 4 and windchange = 0 and  cws = 3 and windran < .1) [set windchange  1 set cws  2]
+If (wsv = 4 and windchange = 0 and  cws = 3 and windran >  .8) [set windchange  1 set cws  4]
+If (wsv = 4 and windchange = 0 and  cws = 4 and windran < .6) [set windchange  1 set cws  3]
+
+  set ember-rand (random-float 55)
+   if (cws = 1)
+      [set wd .8 set wd-1 .8 set wd-2 .8 set wd-3 .8 set wd-4 .8 set wd-5 .8 set wd-6 .8 set wd-7 .8 set ember-fly-dist 0]
+   if (cws = 2)
+      [set wd 1 set wd-1 .9 set wd-2 .8 set wd-3 .7 set wd-4 .7 set wd-5 .7 set wd-6 .8 set wd-7 .9 set ember-fly-dist 0]
+   if (cws = 3 )
+      [set wd 1.2 set wd-1 1 set wd-2 .7 set wd-3 .6 set wd-4 .5 set wd-5 .6 set wd-6 .7 set wd-7 1 set ember-fly-dist 0]
+   if (cws = 4)
+      [set wd 1.4 set wd-1 1 set wd-2 .4 set wd-3 .2 set wd-4 .1 set wd-5 .2 set wd-6 .4 set wd-7 1  set ember-fly-dist int(( (0.0031 * (ember-rand ^ 2)) + ( -0.0176 * (ember-rand)) +  0.2))]
+
+end
+
+to calc-windinfluence
+ if (wind-direction = "S")
+  [ ask patch-at 0 1 [set wind wd]
+   ask patch-at 1 1 [set wind wd-1]
+   ask patch-at 1 0 [set wind wd-2]
+   ask patch-at 1 -1 [set wind wd-3]
+   ask patch-at 0 -1 [set wind wd-4]
+   ask patch-at -1 -1 [set wind wd-5]
+   ask patch-at -1 0 [set wind wd-6]
+   ask patch-at -1 1 [set wind wd-7]
+   set direction 0 ]
+ if (wind-direction = "SW")
+  [ ask patch-at 0 1 [set wind wd-7]
+   ask patch-at 1 1 [set wind wd]
+   ask patch-at 1 0 [set wind wd-1]
+   ask patch-at 1 -1 [set wind wd-2]
+   ask patch-at 0 -1 [set wind wd-3]
+   ask patch-at -1 -1 [set wind wd-4]
+   ask patch-at -1 0 [set wind wd-5]
+   ask patch-at -1 1 [set wind wd-6]
+   set direction 45]
+ if (wind-direction = "W")
+  [ ask patch-at 0 1 [set wind wd-6]
+   ask patch-at 1 1 [set wind wd-7]
+   ask patch-at 1 0 [set wind wd]
+   ask patch-at 1 -1 [set wind wd-1]
+   ask patch-at 0 -1 [set wind wd-2]
+   ask patch-at -1 -1 [set wind wd-3]
+   ask patch-at -1 0 [set wind wd-4]
+   ask patch-at -1 1 [set wind wd-5]
+   set direction 90]
+ if (wind-direction = "NW")
+  [ ask patch-at 0 1 [set wind wd-5]
+   ask patch-at 1 1 [set wind wd-6]
+   ask patch-at 1 0 [set wind wd-7]
+   ask patch-at 1 -1 [set wind wd]
+   ask patch-at 0 -1 [set wind wd-1]
+   ask patch-at -1 -1 [set wind wd-2]
+   ask patch-at -1 0 [set wind wd-3]
+   ask patch-at -1 1 [set wind wd-4]
+   set direction 135]
+ if (wind-direction = "N")
+  [ ask patch-at 0 1 [set wind wd-4]
+   ask patch-at 1 1 [set wind wd-5]
+   ask patch-at 1 0 [set wind wd-6]
+   ask patch-at 1 -1 [set wind wd-7]
+   ask patch-at 0 -1 [set wind wd]
+   ask patch-at -1 -1 [set wind wd-1]
+   ask patch-at -1 0 [set wind wd-2]
+   ask patch-at -1 1 [set wind wd-3]
+   set direction 180]
+ if (wind-direction = "NE")
+  [ ask patch-at 0 1 [set wind wd-3]
+   ask patch-at 1 1 [set wind wd-4]
+   ask patch-at 1 0 [set wind wd-5]
+   ask patch-at 1 -1 [set wind wd-6]
+   ask patch-at 0 -1 [set wind wd-7]
+   ask patch-at -1 -1 [set wind wd]
+   ask patch-at -1 0 [set wind wd-1]
+   ask patch-at -1 1 [set wind wd-2]
+   set direction 135]
+ if (wind-direction = "E")
+  [ ask patch-at 0 1 [set wind wd-2]
+   ask patch-at 1 1 [set wind wd-3]
+   ask patch-at 1 0 [set wind wd-4]
+   ask patch-at 1 -1 [set wind wd-5]
+   ask patch-at 0 -1 [set wind wd-6]
+   ask patch-at -1 -1 [set wind wd-7]
+   ask patch-at -1 0 [set wind wd]
+   ask patch-at -1 1 [set wind wd-1]
+   set direction 270]
+ if (wind-direction = "SE")
+  [ ask patch-at 0 1 [set wind wd-1]
+   ask patch-at 1 1 [set wind wd-2]
+   ask patch-at 1 0 [set wind wd-3]
+   ask patch-at 1 -1 [set wind wd-4]
+   ask patch-at 0 -1 [set wind wd-5]
+   ask patch-at -1 -1 [set wind wd-6]
+   ask patch-at -1 0 [set wind wd-7]
+   ask patch-at -1 1 [set wind wd]
+   set direction 315]
+end
+
+;***************************************************************************************
+;***********************************VIEW DATA LAYERS**************************************
+;***************************************************************************************
+
+
+To view-new
+;to choose base map layer visualisation
+ if View = "Place_NP" [import-pcolors-rgb "PNG/Jawoyn_WF_Place2.png"] ask patches [if (burnt < 100) [set pcolor 1] ]
+ if View = "Place_IND" [import-pcolors-rgb "PNG/Jawoyn_AB_Place2.png"] ask patches [if (burnt < 100) [set pcolor 1] ]
+
+ if View = "Grass" [import-pcolors-rgb "PNG/Jawoyn_LC.png"] ask patches [if (burnt < 100) [set pcolor 1] ]
+ if View = "Roads" [import-pcolors-rgb "PNG/Jawoyn_Roads_Rivers.png"] ask patches [if (burnt < 100) [set pcolor 1] ]
+ if View = "Hill Shade" [import-pcolors-rgb "PNG/Jawoyn_HS.png"] ask patches [if (burnt < 100) [set pcolor 1] ]
+ if view = "YSLB"  [import-pcolors-rgb "PNG/Jawoyn_YSLB_19.png"] ask patches [if (burnt < 100) [set pcolor 1] ]
+ if View = "DEM" [import-pcolors-rgb "PNG/Jawoyn_DEM.png"]ask patches [if (burnt < 100) [set pcolor 1] ]
+ if view = "Landsat"  [import-pcolors-rgb "PNG/Jawoyn_SAT.png"]ask patches [if (burnt < 100) [set pcolor 1] ]
+ if view = "Wetness"  [import-pcolors-rgb "PNG/Jawoyn_WET.png"]ask patches [if (burnt < 100) [set pcolor 1] ]
+ if view = "Eco"  [import-pcolors-rgb "PNG/Jawoyn_Habitat.png"]ask patches [if (burnt < 100) [set pcolor 1] ]
+
+
+end
+to viewmonth
+  if (monthburnt = "1") [ ask patches with [HotSpot_Burn < 31] [set dayofmonth 1 set monthname "Febuary"
+    set dayofyear 30 set pcolor palette:scale-gradient palette:scheme-colors "Divergent" "Spectral" 7 HotSpot_Burn 300 90 ]]
+  if (monthburnt = "2") [ ask patches with [HotSpot_Burn < 60] [set dayofmonth 1 set monthname "March"
+    set dayofyear 59 set pcolor palette:scale-gradient palette:scheme-colors "Divergent" "Spectral" 7 HotSpot_Burn 300 90 ]]
+  if (monthburnt = "3") [ ask patches with [HotSpot_Burn < 91] [set dayofmonth 1 set monthname "April"
+    set dayofyear 90 set pcolor palette:scale-gradient palette:scheme-colors "Divergent" "Spectral" 7 HotSpot_Burn 300 90 ]]
+  if (monthburnt = "4") [ ask patches with [HotSpot_Burn < 121] [set dayofmonth 1 set monthname "May"
+    set dayofyear 121 set pcolor palette:scale-gradient palette:scheme-colors "Divergent" "Spectral" 7 HotSpot_Burn 300 90 ]]
+  if (monthburnt = "5") [ ask patches with [HotSpot_Burn < 152] [set dayofmonth 1 set monthname "June"
+    set dayofyear 152 set pcolor palette:scale-gradient palette:scheme-colors "Divergent" "Spectral" 7 HotSpot_Burn 300 90 ]]
+  if (monthburnt = "6") [ ask patches with [HotSpot_Burn < 182] [set dayofmonth 1 set monthname "July"
+    set dayofyear 182 set pcolor palette:scale-gradient palette:scheme-colors "Divergent" "Spectral" 7 HotSpot_Burn 300 90 ]]
+  if (monthburnt = "7") [ ask patches with [HotSpot_Burn < 213] [set dayofmonth 1 set monthname "August"
+    set dayofyear 213 set pcolor palette:scale-gradient palette:scheme-colors "Divergent" "Spectral" 7 HotSpot_Burn 300 90 ]]
+  if (monthburnt = "8") [ ask patches with [HotSpot_Burn < 243] [set dayofmonth 1 set monthname "September"
+    set dayofyear 243 set pcolor palette:scale-gradient palette:scheme-colors "Divergent" "Spectral" 7 HotSpot_Burn 300 90 ]]
+  if (monthburnt = "9") [ ask patches with [HotSpot_Burn < 272] [set dayofmonth 1 set monthname "October"
+    set dayofyear 272 set pcolor palette:scale-gradient palette:scheme-colors "Divergent" "Spectral" 7 HotSpot_Burn 300 90 ]]
+  if (monthburnt = "10")[ ask patches with [HotSpot_Burn < 305] [set dayofmonth 1 set monthname "November"
+    set dayofyear 305 set pcolor palette:scale-gradient palette:scheme-colors "Divergent" "Spectral" 7 HotSpot_Burn 300 90 ]]
+  if (monthburnt = "11")[ ask patches with [HotSpot_Burn < 335] [set dayofmonth 1 set monthname "December"
+    set dayofyear 335 set pcolor palette:scale-gradient palette:scheme-colors "Divergent" "Spectral" 7 HotSpot_Burn 300 90 ]]
+  if (monthburnt = "12")[ ask patches with [HotSpot_Burn < 360] [set dayofmonth 1 set monthname "December"
+    set dayofyear 360 set pcolor palette:scale-gradient palette:scheme-colors "Divergent" "Spectral" 7 HotSpot_Burn 300 90 ]]
+end
+
+
+to setup-patches
+  import-pcolors-rgb "PNG/Jawoyn_HS.png"
+  ask patches [set burnt burnt + 100]
+  set dem-dataset gis:load-dataset "ASCII/Jawoyn_DEM-80.asc"
+  set tslb-dataset gis:load-dataset "ASCII/Jawoyn_YSLB-19.asc"
+  set veg-dataset gis:load-dataset "ASCII/Jawoyn_VEG4-80.asc"
+  set wetness-dataset gis:load-dataset "ASCII/Jawoyn_WET-80.asc"
+;  set burnt2018-dataset gis:load-dataset "ASCII/Jawoyn_Burnt_2018_EOJune.asc"
+  set DOY-dataset gis:load-dataset "ASCII/Jawoyn_Burnt2018_DOY.asc"
+
+  gis:apply-raster dem-dataset elevation
+  gis:apply-raster tslb-dataset  tslb
+  gis:apply-raster veg-dataset veg
+  gis:apply-raster wetness-dataset wetness
+  gis:set-world-envelope      (gis:envelope-of tslb-dataset)
+  ask patches [  ifelse (tslb <= 0) or (tslb >= 0)  [ ] [ set tslb 1 ]  ]
+  ask patches [  ifelse (wetness <= 0) or (wetness >= 0)  [ ] [ set wetness 1 ]  ]
+  ask patches [  ifelse (veg <= 0) or (veg >= 0)  [ ] [ set veg 1 ]  ]
+  ask patches [  ifelse (elevation <= 0) or (elevation >= 0)  [ ] [ set elevation 1 ]  ]
+  gis:apply-raster  DOY-dataset HotSpot_Burn
+ end
+
+
+to save-ignition
+  ask fires [ ask patch-here[set SAVED-IGNITION 1]]
+end
+
+
+;*********************************************************************************
+;***********************************OUT_PUTS**************************************
+;*********************************************************************************
+to exp-ascii
+   ;gis:set-world-envelope (list min-pxcor max-pxcor min-pycor max-pycor )
+  ;let output-raster gis:create-raster world-width world-height gis:world-envelope
+  let output-raster gis:patch-dataset totalout
+  gis:store-dataset output-raster (word "/output/toutput" iteration ".asc")
+  if iteration = 5 or iteration = 10 or iteration = 15 or iteration = 20 or iteration = 55 [ask patches [ set totalout 0] ]
+end
+to save-iter
+  ask patches [if burnt < 100 [set burnt 1] ]
+  ask patches [if burnt = 100 [set burnt 0]]
+  if iteration = 1 [ask patches [ set totalout burnt]]
+  if iteration > 1 [ask patches [ set out1 burnt set totalout (totalout + out1)]]
+end
+
+
+;;******************************* LABELS *********************************
+
+to show-labels
+  let mpx max-pxcor - 20
+  let mpy min-pycor + 470
+  ask patch (mpx - 30) (mpy + 150) [set plabel "kmsq"]
+;  ask patch mpx (mpy + 150) [set plabel int burnt-area]
+  ask patch (mpx - 20) (mpy + 125) [set plabel "day"] ; number of days
+  ask patch (mpx - 70) (mpy + 125) [set plabel timeod] ; time of day
+  ask patch (mpx - 5) (mpy + 125) [set plabel 1]
+  ask patch (mpx - 50) (mpy + 100) [set plabel wind-speed]
+  ask patch (mpx - 0) (mpy + 100) [set plabel "wind"]
+  ask patch (mpx - 130) (mpy + 100) [set plabel wind-direction]
+  let mp-x max-pxcor - 20
+  let mp-y min-pycor + 510
+  ask patch (mp-x - 910) (mp-y + 125) [set plabel "fire danger"]
+  ask patch (mp-x - 880) (mp-y + 125) [set plabel int-fire-danger] ; fire danger
+  ask patch (mp-x - 900) (mp-y + 150) [set plabel "fire weather"]
+end
+to update-labels
+  let mpx max-pxcor - 20
+  let mpy min-pycor + 470
+  let mp-x max-pxcor - 20
+  let mp-y min-pycor + 510
+  ask patch (mpx - 5) (mpy + 150) [set plabel int burnt-area] ; km2
+  ask patch (mpx - 70) (mpy + 125)  [set plabel timeod]
+  ask patch  (mpx - 5) (mpy + 125) [set plabel int ((night) + 1)]
+  ask patch (mp-x - 880) (mp-y + 150) [set plabel Fire_Danger] ; fire weather
+end
+
+to start-recorder
+  carefully [ vid:start-recorder ] [ user-message error-message ]
+end
+
+to create-spinner
+  create-spinners 1 [
+    set shape "clock"
+    setxy (max-pxcor - 30) (max-pycor - 30)
+    set color white - 1.5
+    set size 55
+    set heading 0
+  ]
+    create-spinners 1 [
+    set shape "clock2"
+    setxy (max-pxcor - 30) (max-pycor - 30)
+    set size 60
+    set heading (tod * 2.4 + 150)
+  ]
+end
+
+to save-recording
+  if vid:recorder-status = "inactive" [
+    user-message "The recorder is inactive. There is nothing to save."
+    stop
+  ]
+  ; prompt user for movie location
+  user-message (word
+    "Choose a name for your movie file (the "
+    ".mp4 extension will be automatically added).")
+  let path user-new-file
+  if not is-string? path [ stop ]  ; stop if user canceled
+  ; export the movie
+  carefully [
+    vid:save-recording path
+    user-message (word "Exported movie to " path ".")
+  ] [
+    user-message error-message
+  ]
+end
+
+to explode
+set SAVED-IGNITION 50
+sprout-dots 30
+   [ let randpat (random 2 + 4)
+    let randcol (random 5 + 10)
+      ask dots [pd repeat 10 [ set color randcol fd randpat  rt 10 ]]die]
+;    ask dots [pd repeat 8 [ set color black fd 2 lt 5 ]]]
+end
+to protect-area
+  ;; create burnt cells where the user says to
+  if (mouse-down?)
+    [  ask patch mouse-xcor mouse-ycor
+        [  set SAVED-IGNITION 100 ask neighbors  [ set pcolor blue ]    ]
+        display      ]
+end
+to burn-anim
+  set dayofyear dayofyear + 1
+   ask  patches with [HotSpot_Burn = dayofyear] [set pcolor palette:scale-gradient palette:scheme-colors "Divergent" "Spectral" 7 HotSpot_Burn 300 90 ]
+  set dayofmonth dayofmonth + 1
+  tick
+
+  if dayofyear > 0  and dayofyear < 30 [set monthname "January"]   if monthname = "January" and dayofyear > 30 [set dayofmonth 1]
+  if dayofyear > 30  and dayofyear < 59 [set monthname "Febuary"]   if monthname = "Febuary" and dayofyear > 59 [set dayofmonth 1]
+  if dayofyear > 59  and dayofyear < 90 [set monthname "March" ]   if monthname = "March" and dayofyear > 90 [set dayofmonth 1]
+  if dayofyear > 90  and dayofyear < 120 [set monthname "April"]    if monthname = "April" and dayofyear > 120 [set dayofmonth 1]
+  if dayofyear > 120  and dayofyear < 151 [set monthname "May" ]   if monthname = "May" and dayofyear > 151 [set dayofmonth 1]
+  if dayofyear > 151  and dayofyear < 181 [set monthname "June"]    if monthname = "June" and dayofyear > 181 [set dayofmonth 1]
+  if dayofyear > 181  and dayofyear < 212 [set monthname "July"]    if monthname = "July" and dayofyear > 212 [set dayofmonth 1]
+  if dayofyear > 212  and dayofyear < 243 [set monthname "August"]     if monthname = "August" and dayofyear > 243 [set dayofmonth 1]
+  if dayofyear > 243  and dayofyear < 273 [set monthname "September"]     if monthname = "September" and dayofyear > 273 [set dayofmonth 1]
+  if dayofyear > 273  and dayofyear < 304 [set monthname "October"]     if monthname = "October" and dayofyear > 304 [set dayofmonth 1]
+  if dayofyear > 332  and dayofyear < 334 [set monthname "November"]     if monthname = "November" and dayofyear > 334 [set dayofmonth 1]
+  if dayofyear > 334  [set monthname "December"]     if dayofyear > 352 [stop]
+
+  ask patch -420 -270 [set plabel monthname]
+  ask patch -390 -270 [set plabel dayofmonth]
+end
