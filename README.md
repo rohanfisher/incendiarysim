@@ -54,7 +54,9 @@ Based on the fire break model.
 
 ## CREDITS AND REFERENCES
 
-This model was produced in May 2017, More information about the model can be found at: https://rohanfisher.wordpress.com/incendiary-a-fire-spread-modelling-tool/
+Cite:
+Fisher, Rohan, Scott Heckbert, and Stephen Garnett. 2021. "Reframing Wildfire Simulations for Understanding Complex Human–Landscape Interactions in Cross-Cultural Contexts: A Case Study from Northern Australia" Fire 4, no. 3: 46. https://doi.org/10.3390/fire4030046
+Paper available at: https://www.mdpi.com/2571-6255/4/3/46/htm
 
 Copyright 2017 Rohan Fisher.
 
