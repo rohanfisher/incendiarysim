@@ -1,33 +1,24 @@
 extensions [gis palette vid]
-breed [fires fire] ;fire front
-breed [embers ember] 
-breed [ashes ash] ;burnt land
+breed [fires fire]
+breed [embers ember]
+breed [ashes ash]
 breed [smoke smok] smoke-own [smoke-life]
-breed [spinners spinner ] ;clock
+breed [spinners spinner ]
 breed [dots dot]
 globals [view autoburn burnday today tslb-dataset  dem-dataset
-    veg-dataset wetness-dataset burnt2017-dataset burnt2018-dataset  cliff-dataset
-    DOY-dataset dayofmonth dayofyear date
-    burnt-area border land randburn
-    night timeofday tod iteration timeod int-fire-danger exploded int-ws
-    tempcolor
-    wsv cws windran wd wd-1 wd-2 wd-3 wd-4 wd-5 wd-6 wd-7 direction
-    ember-fly-dist ember-rand hotspots monthname]
-patches-own [ab burntab
-  Wetness
-  elevation
-  burnt
-  veg
-  tslb
-  slope
-  wind
-  burnablity
-  burnprob
-  burnttime
-  fuelload
-  topowet
-  HotSpot_Burn
+    veg-dataset wetness-dataset burnt2017-dataset burnt2018-dataset  cliff-dataset DOY-dataset dayofmonth dayofyear date
+    burnt-area border land  randburn night timeofday tod iteration timeod int-fire-danger exploded int-ws
+  tempcolor  wsv cws windran wd wd-1 wd-2 wd-3 wd-4 wd-5 wd-6 wd-7 direction ember-fly-dist ember-rand hotspots monthname wind-speed]
+patches-own
+[ab burntab  Wetness
+  elevation  burnt
+  veg  tslb
+  slope  wind
+  burnablity  burnprob
+  burnttime  fuelload
+  topowet  HotSpot_Burn
   SAVED-IGNITION out1 totalout]
+
 
 to setup
   __clear-all-and-reset-ticks
@@ -36,6 +27,8 @@ to setup
   set night night = 0
   set ember-fly-dist 0
   set-time-of-day
+  set wind-speed "light"
+  set wind-direction "SE"
   ask patches [set wind 1]
   ask patches [set burnttime 1]
   set border patches with [ count neighbors != 8 ]
@@ -61,17 +54,17 @@ to go
     ask border   [  ask turtles-here [ die ]  ]
     ask turtles  [calc-slope]
     ask turtles [calc-windinfluence]
-    if ticks = 0 [set-windspeed ask patches [set-topowet] ]
+    if ticks = 0 [ask patches [set-topowet] ]
+    if ticks = 0 and fire_danger > 10 [set fire_danger 10]
     check-spread
     set burnt-area ((count patches with [burnt = 0]) * 0.0064) ;; Need To Change With Difference Spatial Resolution
     fade-embers
     set tod tod + 1
-    ;;if not any? turtles [save-iter]
     change-wind-speed
     tick
     if vid:recorder-status = "recording" [ vid:record-view ]
-     ask spinners with [size > 59] [ set heading  (tod * 2.4 + 150)]
-  if exploded = 1 [ ask patches with [SAVED-IGNITION = 50] [explode] ]
+    ask spinners with [size > 59] [ set heading  (tod * 2.4 + 150)]
+    if exploded = 1 [ ask patches with [SAVED-IGNITION = 50] [explode] ]
     update-labels
     move-smoke
 end
@@ -84,7 +77,6 @@ show-labels
 set-windspeed
 set-time-of-day
 ask patches [if TSLB = 0 [set fuelload (-0.15 * Fire_Danger + 1.75)]]
-
 end
 
 ;***************************************************************************************
@@ -92,23 +84,57 @@ end
 ;***************************************************************************************
 
 to check-spread
-    ask fires  ;;determines intial spread make probability lower to simultate rapid fire spred only under high burn conditions.
-     [ set randburn (random-float 60) ;22
+    ask fires
+     [ set randburn (random-float 50)  ;;determines intial spread -  reduce this value to illustrate rapid fire spred only under high burn conditions.
           ask neighbors [ set burnablity  (fuelload * (((-0.039 * (Fire_Danger ^ 2)) + (Fire_Danger * 0.8) - 0.7)  * (topowet)))]
           ask neighbors [ set burnprob ((burnablity * (wind * slope)))]
           ask neighbors with [randburn < burnprob and burnt = 100 ][ignite]
         let emberfly patch-at-heading-and-distance direction ember-fly-dist
-        if emberfly != nobody  [ask emberfly [if burnt = 100 [ignite]]]
+        if emberfly != nobody  [ask emberfly [if burnt = 100 [ignite]]] ; spotting function during strong winds
         set breed embers
         make-smoke ]
 ask embers
-        [ set randburn (random-float 50) ;23
-          ask neighbors with [ ((randburn + (burnttime * 2)) < (burnprob)) and burnt = 100 ][let ransnd random 20 ignite]] ;2.5
+        [ set randburn (random-float 50)  ;;
+          ask neighbors with [ ((randburn + (burnttime * 2)) < (burnprob)) and burnt = 100 ][ignite]] ;reduces spread probability over time
 end
 
 ;***************************************************************************************
 ;*************************************    IGNITION   ***********************************
 ;***************************************************************************************
+
+;drop incendaries
+to ignite-grass
+;; light a fire where the user says to
+  if (mouse-down?)
+    [  ask patch mouse-xcor mouse-ycor
+      [  sprout-fires 1
+        [  set color 45
+          ask patches in-cone 1 360
+          [ sprout-fires 1
+            [  set color 45
+            ;;  set burnt burnt - 100   ]
+                ]  ]]
+        display      ]    ]
+end
+
+to ignite
+  sprout-fires 1
+    [ set color 45     set burnt burnt - 100
+      ]
+  if Protected-areas [ask self [if SAVED-IGNITION = 100 [explode set exploded 1] ]]
+end
+
+;re-ignite saved patches
+to set-ignition
+  ask patches with [SAVED-IGNITION = 1]
+  [ sprout-fires 1 [set color 45 ]]
+end
+
+;***************************************************************************************
+;********************************** SMOKE - EMBERS   ***********************************
+;***************************************************************************************
+
+
 to make-smoke
   if (cws = 1)
       [ask patch-here [sprout-smoke 1 [set smoke-life random 400 set size 4 set color [200 200 200 20]]] ]
@@ -131,50 +157,6 @@ to move-smoke
   ask smoke [if smoke-life > 180 [die]]
 end
 
-to ignite
-  sprout-fires 1
-    [ set color 45     set burnt burnt - 100
-      ]
-  if Protected-areas [ask self [if SAVED-IGNITION = 100 [explode set exploded 1] ]]
-;  set pcolor black
-
-end
-
-;drop incendaries
-to ignite-forest
-;; light a fire where the user says to
-  if (mouse-down?)
-    [  ask patch mouse-xcor mouse-ycor
-      [  sprout-fires 1
-        [  set color 45
-          ask patches in-cone 1 360
-          [ sprout-fires 1
-            [  set color 45
-            ;;  set burnt burnt - 100   ]
-                ]  ]]
-        display      ]    ]
-end
-
-;re-ignite saved patches
-to set-ignition
-  ask patches with [SAVED-IGNITION = 1]
-  [ sprout-fires 1 [set color 45 ]]
-end
-
-;Draw fire-break
-to fire-break
-  ;; create burnt cells where the user says to
-  if (mouse-down?)
-    [  ask patch mouse-xcor mouse-ycor
-      [  sprout-ashes 1
-        [  set color black
-          ask patches in-cone 3 360
-          [ sprout-ashes 1
-            [  set color black
-              set burnt burnt - 100   ]    ]  ]
-        display      ]    ]
-end
-
 to fade-embers
     ask embers
     [ set  burnttime burnttime + 1
@@ -195,32 +177,27 @@ to fade-embers
       if burnttime > 60 [set pcolor 1 die]]
 end
 
+;Draw fire-break
+to fire-break
+  ;; create burnt cells where the user says to
+  if (mouse-down?)
+    [  ask patch mouse-xcor mouse-ycor
+      [  sprout-ashes 1
+        [  set color black
+          ask patches in-cone 3 360
+          [ sprout-ashes 1
+            [  set color black
+              set burnt burnt - 100   ]    ]  ]
+        display      ]    ]
+end
 
 ;***************************************************************************************
 ;******************************BURNABILITY LAYER ADJUSTMENTS****************************
 ;***************************************************************************************
 
-to set-topowet
-  set topowet wetness
-  if ( wetness  > .7 and wetness < .8 and Fire_Danger = 10) [set topowet (1.4)]
-  if ( wetness  > .8 and wetness < .9 and Fire_Danger = 7) [set topowet (1)]
-  if ( wetness  > .8 and wetness < .9 and Fire_Danger > 7) [set topowet (1.2)]
-  if ( wetness  > .9 and wetness < 1 and Fire_Danger = 7) [set topowet (1)]
-  if ( wetness  > .9 and wetness < 1 and Fire_Danger > 7) [set topowet (1.1)]
-  if ( wetness  > 1.05 and wetness < 1.1 and Fire_Danger > 8) [set topowet (1)]
-  if ( wetness  > 1.1 and wetness < 1.15 and Fire_Danger > 7) [set topowet (1)]
-  if ( wetness  > 1.15 and wetness < 1.2 and Fire_Danger > 8) [set topowet (.8)]
-  if ( wetness  > 1.2 and wetness < 1.3 and Fire_Danger = 7) [set topowet (1.1)]
-  if ( wetness  > 1.2 and wetness < 1.3 and Fire_Danger = 8) [set topowet (.8)]
-  if ( wetness  > 1.2 and wetness < 1.3 and Fire_Danger > 8) [set topowet (.7)]
-  if ( wetness  > 1.3 and Fire_Danger = 7) [set topowet (.8)]
-  if ( wetness  > 1.3 and Fire_Danger = 8) [set topowet (.7)]
-  if ( wetness  > 1.3 and Fire_Danger > 8) [set topowet (.6)]
-end
 
-to set-fuelload
-;based on: C. P. Yates et al., “Fuel accumulation, consumption and fire patchiness in the lower rainfall savanna region,” Carbon Account. Savanna Fire Manag., pp. 115–132, 2015, 
 
+to set-fuelload;based on: C. P. Yates et al., “Fuel accumulation, consumption and fire patchiness in the lower rainfall savanna region,” Carbon Account. Savanna Fire Manag., pp. 115–132, 2015,
    if veg = 1  [set fuelload (( -0.0054 * (tslb ^ 2)) + (0.0966 * tslb) + 0.87) ] ; tussock
    if veg = 2 [set fuelload ( (0.0014 * (tslb ^ 3)) + ( -0.0421 * (tslb ^ 2)) + ( 0.4243 * tslb) + 0.115) ] ;Hummock
    if veg = 3 [set fuelload ( (0.001115 * (tslb ^ 3)) + ( -0.03 * (tslb ^ 2)) + ( 0.28 * tslb) + 0.5) ] ; mixed
@@ -234,7 +211,33 @@ to set-fuelload
    if TSLB = 0 [set fuelload (.5)]
 end
 
+to set-topowet ; Adjustments of fuel curing and grass fuel loads along riparian zones in late dry season
+  set topowet wetness
 
+  if ( wetness  > .7 and wetness < .8 and Fire_Danger > 8) [set topowet (1.3)]
+  if ( wetness  > .7 and wetness < .8 and Fire_Danger = 8) [set topowet (1.2)]
+  if ( wetness  > .7 and wetness < .8 and Fire_Danger = 7) [set topowet (1.1)]
+
+  if ( wetness  > .8 and wetness < .9 and Fire_Danger > 8) [set topowet (1.2)]
+
+  if ( wetness  > .9 and wetness < 1 and Fire_Danger > 7) [set topowet (1.1)]
+  if ( wetness  > .9 and wetness < 1 and Fire_Danger = 7) [set topowet (1.1)]
+
+  if ( wetness  > 1 and wetness < 1.1 and Fire_Danger > 8) [set topowet (1.05)]
+  if ( wetness > 1 and wetness < 1.1 and Fire_Danger = 8) [set topowet (1.05)]
+  if ( wetness > 1 and wetness < 1.1 and Fire_Danger = 7) [set topowet (1)]
+
+  if ( wetness  > 1.1 and wetness < 1.2 and Fire_Danger > 8) [set topowet (.9)]
+  if ( wetness  > 1.1 and wetness < 1.2 and Fire_Danger = 8) [set topowet (1)]
+  if ( wetness  > 1.1 and wetness < 1.2 and Fire_Danger = 7) [set topowet (.95)]
+
+  if ( wetness  > 1.2 and wetness < 1.3 and Fire_Danger = 7) [set topowet (.9)]
+  if ( wetness  > 1.2 and wetness < 1.3 and Fire_Danger = 8) [set topowet (.85)]
+  if ( wetness  > 1.2 and wetness < 1.3 and Fire_Danger > 8) [set topowet (.8)]
+  if ( wetness  > 1.3 and Fire_Danger = 7) [set topowet (.8)]
+  if ( wetness  > 1.3 and Fire_Danger = 8) [set topowet (.7)]
+  if ( wetness  > 1.3 and Fire_Danger > 8) [set topowet (.65)]
+end
 
 ;***************************************************************************************
 ;***********************************SLOPE***********************************************
@@ -306,23 +309,23 @@ to changeFire_Danger ;;NTC - with differeing cell size
 
 if tod > 300 [set tod 0 set night night + 1]
 if tod = 180 [set timeofday "night"
-  ask patch 100 100 [ sprout-dots 1 [ set size 5000 set color [1 1 1 15]]]]
-  if tod = 184 [ask dots [ set color [1 1 1 25]]]
-  if tod = 186 [ask dots [ set color [1 1 1 30]]]
-  if tod = 187 [ask dots [ set color [1 1 1 37]]]
-  if tod = 188 [ask dots [ set color [1 1 1 42]]]
-  if tod = 189 [ask dots [ set color [1 1 1 50]]]
-  if tod = 191 [ask dots [ set color [1 1 1 65]]]
-  if tod = 193 [ask dots [ set color [1 1 1 75]]]
+  ask patch 100 100 [ sprout-dots 1 [ set size 5000 set color [1 1 1 2]]]]
+  if tod = 184 [ask dots [ set color [1 1 1 3]]]
+  if tod = 186 [ask dots [ set color [1 1 1 4]]]
+  if tod = 187 [ask dots [ set color [1 1 1 6]]]
+  if tod = 188 [ask dots [ set color [1 1 1 8]]]
+  if tod = 189 [ask dots [ set color [1 1 1 10]]]
+  if tod = 191 [ask dots [ set color [1 1 1 12]]]
+  if tod = 193 [ask dots [ set color [1 1 1 15]]]
 
 if tod = 135 and wsv > 1 [set wsv int-ws - 1]
 if tod = 14 and wsv < 4 and int-ws != 1 [set wsv int-ws]
-  if tod = 1 [set timeofday "day" ask dots [ set color [1 1 1 55]]]
-  if tod = 2 [ask dots [ set color [1 1 1 47]]]
-  if tod = 4 [ask dots [ set color [1 1 1 40]]]
-  if tod = 6 [ask dots [ set color [1 1 1 35]]]
-  if tod = 8 [ask dots [ set color [1 1 1 25]]]
-  if tod = 10 [ask dots [ set color [1 1 1 10]]]
+  if tod = 1 [set timeofday "day" ask dots [ set color [1 1 1 13]]]
+  if tod = 2 [ask dots [ set color [1 1 1 12]]]
+  if tod = 4 [ask dots [ set color [1 1 1 10]]]
+  if tod = 6 [ask dots [ set color [1 1 1 8]]]
+  if tod = 8 [ask dots [ set color [1 1 1 5]]]
+  if tod = 10 [ask dots [ set color [1 1 1 2]]]
   if tod = 12 [ask dots [ die]];
 
       if tod = 13 [set Fire_Danger Fire_Danger + 1 set timeod "Morning" ]
@@ -339,12 +342,9 @@ end
 To set-time-of-day
   if set-time = "morning" [set tod 14 set timeod "morning" set Fire_Danger Fire_Danger - 1]
     if set-time = "noon" [set tod 63 set timeod "noon"]
-      if set-time = "afternoon" [set tod 113 set timeod "afternoon" set Fire_Danger Fire_Danger + 1]
+  if set-time = "afternoon" [set tod 111 set timeod "afternoon"  if fire_danger > 10 [set fire_danger 10]]
         if set-time = "evening" [set tod 163  set timeod "evening"]
 end
-
-
-
 
 
 ;***************************************************************************************
@@ -397,7 +397,7 @@ If (wsv = 4 and windchange = 0 and  cws = 3 and windran < .1) [set windchange  1
 If (wsv = 4 and windchange = 0 and  cws = 3 and windran >  .8) [set windchange  1 set cws  4]
 If (wsv = 4 and windchange = 0 and  cws = 4 and windran < .6) [set windchange  1 set cws  3]
 
-  set ember-rand (random-float 55)
+  set ember-rand (random-float 50)
    if (cws = 1)
       [set wd .8 set wd-1 .8 set wd-2 .8 set wd-3 .8 set wd-4 .8 set wd-5 .8 set wd-6 .8 set wd-7 .8 set ember-fly-dist 0]
    if (cws = 2)
@@ -405,7 +405,7 @@ If (wsv = 4 and windchange = 0 and  cws = 4 and windran < .6) [set windchange  1
    if (cws = 3 )
       [set wd 1.2 set wd-1 1 set wd-2 .7 set wd-3 .6 set wd-4 .5 set wd-5 .6 set wd-6 .7 set wd-7 1 set ember-fly-dist 0]
    if (cws = 4)
-      [set wd 1.4 set wd-1 1 set wd-2 .4 set wd-3 .2 set wd-4 .1 set wd-5 .2 set wd-6 .4 set wd-7 1  set ember-fly-dist int(( (0.0031 * (ember-rand ^ 2)) + ( -0.0176 * (ember-rand)) +  0.2))]
+      [set wd 1.4 set wd-1 1 set wd-2 .4 set wd-3 .2 set wd-4 .1 set wd-5 .2 set wd-6 .4 set wd-7 1  set ember-fly-dist ROUND(( (0.0031 * (ember-rand ^ 2)) + ( -0.0176 * (ember-rand)) +  0.2))]
 
 end
 
@@ -499,7 +499,7 @@ end
 
 To view-new
 ;to choose base map layer visualisation
- if View = "Place_NP" [import-pcolors-rgb "PNG/Jawoyn_WF_Place2.png"] ask patches [if (burnt < 100) [set pcolor 1] ]
+ if View = "Place_NP" [import-pcolors-rgb "PNG/Jawoyn_WF_Place3.png"] ask patches [if (burnt < 100) [set pcolor 1] ]
  if View = "Place_IND" [import-pcolors-rgb "PNG/Jawoyn_AB_Place2.png"] ask patches [if (burnt < 100) [set pcolor 1] ]
 
  if View = "Grass" [import-pcolors-rgb "PNG/Jawoyn_LC.png"] ask patches [if (burnt < 100) [set pcolor 1] ]
@@ -545,7 +545,7 @@ to setup-patches
   import-pcolors-rgb "PNG/Jawoyn_HS.png"
   ask patches [set burnt burnt + 100]
   set dem-dataset gis:load-dataset "ASCII/Jawoyn_DEM-80.asc"
-  set tslb-dataset gis:load-dataset "ASCII/Jawoyn_YSLB-19.asc"
+  set tslb-dataset gis:load-dataset "ASCII/Jawoyn_YSLB-18.asc"
   set veg-dataset gis:load-dataset "ASCII/Jawoyn_VEG4-80.asc"
   set wetness-dataset gis:load-dataset "ASCII/Jawoyn_WET-80.asc"
 ;  set burnt2018-dataset gis:load-dataset "ASCII/Jawoyn_Burnt_2018_EOJune.asc"
@@ -659,10 +659,10 @@ end
 
 to explode
 set SAVED-IGNITION 50
-sprout-dots 30
+sprout-dots 20
    [ let randpat (random 2 + 4)
     let randcol (random 5 + 10)
-      ask dots [pd repeat 10 [ set color randcol fd randpat  rt 10 ]]die]
+      ask dots [pd repeat 6 [ set color randcol fd randpat  rt 10 ]]die]
 ;    ask dots [pd repeat 8 [ set color black fd 2 lt 5 ]]]
 end
 to protect-area
